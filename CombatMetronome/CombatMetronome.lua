@@ -103,6 +103,12 @@ function CombatMetronome:Update()
 			self.lastInterval = time
 			interval = true
 		end
+		
+		if (IsBlockActive() or self.wasBlockCast) and Util.Ability.queuedFake then
+			zo_removeCallLater(Util.Ability.queuedFake)
+			Util.Ability.queuedFake = nil
+		end
+
 			---------------------
 			---- GCD Tracker ----
 			---------------------
@@ -119,7 +125,7 @@ function CombatMetronome:Update()
 			self.bar:Update()
 		elseif self.currentEvent then
 			local ability = self.currentEvent.ability
-            local start = self.currentEvent.start
+			local start = self.currentEvent.start
 			if self.wasBlockCast and not IsBlockActive() then
 				self.wasBlockCast = false
 			end
@@ -255,7 +261,7 @@ function CombatMetronome:Update()
 					self.rollDodge = false
 				end
 				-- spellInterrupter = false
-			-- end
+				-- end
 			elseif self.rollDodge and trackGCD then
 				self:HideLabels(true)
 				self.bar.segments[1].progress = 0
@@ -411,6 +417,10 @@ function CombatMetronome:RegisterCM()
 			if barswap then
 				self.barswap = barswap
 				-- d("barswap occured. Hotbar was "..category)
+				if Util.Ability.queuedFake then
+					zo_removeCallLater(Util.Ability.queuedFake)
+					Util.Ability.queuedFake = nil
+				end
 			end
 			return self.barswap
 		end
@@ -423,6 +433,10 @@ function CombatMetronome:RegisterCM()
 			if sourceType == COMBAT_UNIT_TYPE_PLAYER and abilityId == 29721 and changeType == 3 then			--- 69143 is DodgeFatigue
 				self.rollDodge = true
 				-- d("Dodge detected")
+				if Util.Ability.queuedFake then
+					zo_removeCallLater(Util.Ability.queuedFake)
+					Util.Ability.queuedFake = nil
+				end
 			end
 			return self.rollDodge
 		end

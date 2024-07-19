@@ -284,9 +284,9 @@ function Ability.Tracker:HandleSlotUsed(e, slot)
         local isMounted = time < self.lastMounted + DISMOUNT_PERIOD + EVENT_RECORD_DELAY
         local isWeaponSheathed = time < self.weaponLastSheathed + EVENT_FORCE_WAIT + EVENT_RECORD_DELAY
         if isMounted then
-            zo_callLater(function() self:HandleSlotUpdated("FAKE_EVENT", slot) end, 1000);
+            Ability.queuedFake = zo_callLater(function() self:HandleSlotUpdated("FAKE_EVENT", slot) end, 1000);
         elseif isWeaponSheathed then
-            zo_callLater(function() self:HandleSlotUpdated("FAKE_EVENT", slot) end, 1000);
+            Ability.queuedFake = zo_callLater(function() self:HandleSlotUpdated("FAKE_EVENT", slot) end, 1000);
         else
             self:HandleSlotUpdated("FAKE_EVENT", slot)
         end
