@@ -24,6 +24,7 @@ ZO_CreateStringId("SI_BINDING_NAME_COMBATMETRONOME_FORCE", "Force display")
 	-------------------------
 
 function CombatMetronome:Update()
+	local latency, cdTimer
 
 	------------------------
 	---- Sample Section ----
@@ -118,7 +119,10 @@ function CombatMetronome:Update()
 			self.bar:Update()
 		elseif self.currentEvent then
 			local ability = self.currentEvent.ability
-			local start = self.currentEvent.start
+            local start = self.currentEvent.start
+			if self.wasBlockCast and not IsBlockActive() then
+				self.wasBlockCast = false
+			end
 			if time - start < 0 then
 				cdTimer = 0
 			else
@@ -129,7 +133,6 @@ function CombatMetronome:Update()
 			local channelTime = ability.delay + self.currentEvent.adjust
 			local timeRemaining = ((start + channelTime + GetLatency()) - time) / 1000
 			-- local playerDidDodge = CombatMetronome:CheckForDodge()
-			local playerDidBlock = IsBlockActive()
 			
 			if ability.heavy then
 				if self.config.displayPingOnHeavy then
@@ -231,28 +234,28 @@ function CombatMetronome:Update()
 			--------------------
 			---- Interrupts ----							-- check for interrupts by dodge, barswap or block
 			--------------------
-			if (playerDidBlock or self.rollDodge or self.barswap) then
+			if (IsBlockActive() and not self.wasBlockCast) or self.rollDodge or self.barswap then
 				-- local spellInterrupter = true
 				local eventAdjust = 0
 				if self.currentEvent then
 					if self.currentEvent.adjust then
 						eventAdjust = self.currentEvent.adjust
 					end
-				end
 				-- if spellInterrupter then
 					-- d(self.currentEvent.adjust)
-					if duration > 1000+latency+eventAdjust then
+					if self.currentEvent.ability and (not self.currentEvent.ability.instant) then
 						self:OnCDStop()
 						self.bar:Update()
 					end
-					if self.barswap then
-						self.barswap = false
-					end
-					if self.rollDodge then
-						self.rollDodge = false
-					end
-					-- spellInterrupter = false
-				-- end
+				end
+				if self.barswap then
+					self.barswap = false
+				end
+				if self.rollDodge then
+					self.rollDodge = false
+				end
+				-- spellInterrupter = false
+			-- end
 			elseif self.rollDodge and trackGCD then
 				self:HideLabels(true)
 				self.bar.segments[1].progress = 0
@@ -266,7 +269,8 @@ function CombatMetronome:Update()
 				self.bar:Update()
 				self.rollDodge = false
 			end
-		else
+        else
+			self.wasBlockCast = false
 			self:OnCDStop()
 			self.bar:Update()
 		end
@@ -342,9 +346,9 @@ end
 	-----------------------------
 
 function CombatMetronome:RegisterMetadata()
-	EVENT_MANAGER:RegisterForUpdate(
-        self.name.."CurrentActionslotsOnHotbar",
-        1000 / 60,
+    EVENT_MANAGER:RegisterForEvent(
+		self.name .. "CurrentActionslotsOnHotbar",
+		EVENT_ACTION_SLOT_UPDATED,
         function()
 			self.actionSlotCache = CombatMetronome:StoreAbilitiesOnActionBar()
 			-- self.menu.abilityAdjustChoices = CombatMetronome:BuildListForAbilityAdjusts()
@@ -383,12 +387,19 @@ function CombatMetronome:RegisterCM()
         self.name.."SlotUsed",
         EVENT_ACTION_SLOT_ABILITY_USED,
         function(e, slot)
-            local ability = Util.Ability:ForId(GetSlotBoundId(slot))
+			self.wasBlockCast = IsBlockActive()
+            local ability
+            local actionType = GetSlotType(slot)
+			if actionType == ACTION_TYPE_CRAFTED_ABILITY then
+				ability = Util.Ability:ForId(GetAbilityIdForCraftedAbilityId(GetSlotBoundId(slot)), actionType)
+			else
+				ability = Util.Ability:ForId(GetSlotBoundId(slot), actionType)
+			end
             -- log("Abilty used - ", ability.name)
-            if (ability and ability.heavy) then
-                -- log("Cancelling heavy")
-                self.currentEvent = nil
-            end
+            -- log("Cancelling heavy")
+			if self.currentEvent and self.currentEvent.ability and (self.currentEvent.ability.type == ACTION_SLOT_TYPE_WEAPON_ATTACK) then
+				self.currentEvent = nil
+			end
         end
     )
 	self.cmRegistered = true

@@ -210,7 +210,7 @@ function CombatMetronome:HandleAbilityUsed(event)
 		event.adjust = event.adjust + (338 * cruxes)
 		-- d(string.format("Fatecarver duration succesfully adjusted with %d crux(es)", cruxes))
 	end
-	if self.config.stopHATracking and event.ability.type == 6 then
+	if self.config.stopHATracking and event.ability.heavy then
 		self.currentEvent = nil
 	else
 		self.currentEvent = event
@@ -370,10 +370,14 @@ function CombatMetronome:StoreAbilitiesOnActionBar()
     for j = 0, 1 do
         for i = 3, 8 do
             local actionSlot = {}  -- Create a new table for each action slot
-            -- setmetatable(actionSlot, {__index = index})
-            
+			local slotType = GetSlotType(i, j);
+            -- setmetatable(actionSlot, {__index = index})      
             actionSlot.place = tostring(i .. j)
-            actionSlot.id = GetSlotBoundId(i, j)
+			if slotType == ACTION_TYPE_CRAFTED_ABILITY then
+				actionSlot.id = GetAbilityIdForCraftedAbilityId(GetSlotBoundId(i, j));
+			else
+				actionSlot.id = GetSlotBoundId(i, j)
+			end;  
             actionSlot.icon = GetAbilityIcon(actionSlot.id)
             actionSlot.name = self:CropZOSSpellName(GetAbilityName(actionSlot.id))
 

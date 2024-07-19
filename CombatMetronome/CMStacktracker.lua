@@ -7,7 +7,7 @@ local trackerShouldBeVisible = false
 local sampleAnimationStarted = false
 
 function CombatMetronome:TrackerUpdate()
-
+	local stacks, previousStack
     ------------------------
 	---- Sample Section ----
 	------------------------

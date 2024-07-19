@@ -7,7 +7,7 @@ Ability.nameCache = { }
 
 local log = Util.log
 
-function Ability:ForId(id)
+function Ability:ForId(id, actionSlotType)
     -- local APIVersion = GetAPIVersion()
 	local o = self.cache[id]
 	if (o) then 
@@ -21,37 +21,15 @@ function Ability:ForId(id)
 	setmetatable(o, self)
 	self.__index = self
 
-	local name, actionSlotType, passive
-    for i = 1, 300000 do
-        if (id == GetAbilityIdByIndex(i)) then
-            name, _, _, actionSlotType, passive, _ = GetAbilityInfoByIndex(i)
-            break
-        end
-    end
-
     o.id = id
     o.name = GetAbilityName(id)
-    -- if APIVersion < 101042 then
-    -- o.channeled, 
-    -- o.castTime, 
-    -- o.channelTime = GetAbilityCastInfo(id)                                                   --- this was pre API 101042
-    -- if o.channelTime == nil then
-    local channeled, duration = GetAbilityCastInfo(id)
+    local channeled, durationValue = GetAbilityCastInfo(id)
     o.channeled = channeled
-    if channeled then
-        o.channelTime = duration
-        o.castTime = 0
-    else
-        o.castTime = duration
-        o.channelTime = 0
-    end
+    o.delay = durationValue
     -- end
-    o.delay = math.max(o.castTime, o.channelTime)
-    o.instant = not (o.castTime > 0 or (o.channeled and o.channelTime > 0))
+    o.instant = not (o.channeled or o.delay > 0)
     o.casted = not (o.instant or o.channeled)
-    o.passive = passive
     o.target = GetAbilityTargetDescription(id)
-    o.type = actionSlotType
 	o.icon = GetAbilityIcon(id)
 
     o.duration = GetAbilityDuration(id)
@@ -61,8 +39,10 @@ function Ability:ForId(id)
     o.isDamageAbility = GetAbilityRoles(id)
 
     o.ground = o.target == "Ground"
-    o.heavy = o.type == ACTION_SLOT_TYPE_HEAVY_ATTACK
-    o.light = o.type == ACTION_SLOT_TYPE_LIGHT_ATTACK
+
+    o.type = actionSlotType
+    o.heavy = (actionSlotType == ACTION_SLOT_TYPE_HEAVY_ATTACK)
+    o.light = (actionSlotType == ACTION_SLOT_TYPE_LIGHT_ATTACK)
 
     o.hasProgression,
     o.progressionIndex = GetAbilityProgressionXPInfoFromAbilityId(id)
@@ -75,25 +55,15 @@ function Ability:ForId(id)
         o.baseId = GetAbilityProgressionAbilityId(o.progressionIndex, 0, 1)
     end
 
-    if (name) then
+    if (o.name) then
         -- d(" Caching from id! slot = "..tostring(o.slot))
-        self.nameCache[name] = o
+        self.nameCache[o.name] = o
     end
 
     self.cache[id] = o
-
     return o
 end
 
-function Ability:ForName(name)
-    local o = self.nameCache[name]
-    if (o) then
-        -- d(" Ability "..o.id.." is cached for name, "..name)
-        return o 
-    end
-
-    return self:ForId(Ability.getIdFromName(name))
-end
 
 function Ability:CropZOSSpellName(zosString)
     local _, zosSpellDivider = string.find(zosString, "%^")
@@ -105,16 +75,6 @@ function Ability:CropZOSSpellName(zosString)
     end
 end
 
-function Ability.getIdFromName(name)
-    local hotbar = GetActiveHotbarCategory()
-    for i = 1, 300000 do
-        if (CanAbilityBeUsedFromHotbar(i, hotbar) and name == GetAbilityName(i)) then
-            return i
-        end
-    end
-
-    return nil
-end
 
 -- -------- --
 -- Tracking --
@@ -138,6 +98,7 @@ function Ability.Tracker:Start()
 
     self.log = false
     self.lastMounted = 0
+    self.weaponLastSheathed = 0
 
     EVENT_MANAGER:RegisterForUpdate(self.name.."Update", 1000 / 30, function(...)
         self:Update()
@@ -185,6 +146,10 @@ function Ability.Tracker:Update()
 
     if (IsMounted()) then
         self.lastMounted = time
+    end
+
+    if ArePlayerWeaponsSheathed() then
+        self.weaponLastSheathed = time
     end
 end
 
@@ -268,21 +233,20 @@ end
 
 function Ability.Tracker:HandleSlotUpdated(e, slot)
     if (slot < 3) then return end
-
     local remaining, duration, global, t = GetSlotCooldownInfo(slot)
     local time = GetFrameTimeMilliseconds()
 
-    if (duration > 0 and remaining > 0) then
+    if (duration > 0 and remaining > 0) or e == "FAKE_EVENT" then
         self.gcd = duration
 
         local oldStart = self.eventStart or 0
-        self.eventStart = time + remaining - duration 
+        self.eventStart = time + remaining - duration
 
         if (oldStart ~= self.eventStart) then
             -- _=self.log and d(""..time.." : Event start "..tostring(duration - remaining).."ms ago")
         end
         
-        if (self.queuedEvent and self.queuedEvent.triggerOnSlotUpdated and self.eventStart > oldStart + 100) then
+        if (self.queuedEvent and (self.queuedEvent.casted or self.eventStart > oldStart + 100)) then
             -- _=self.log and d(""..time.." : Moved queued "..self.queuedEvent.ability.name.." to current") 
             -- log("  Dispatching ", self.queuedEvent.ability.name)
             -- log("    oldStart = ", oldStart)
@@ -295,14 +259,15 @@ end
 
 function Ability.Tracker:HandleSlotUsed(e, slot)
     if (slot > 8) then return end
-
-    local ability = Util.Ability:ForId(GetSlotBoundId(slot))--, slot)
+    local ability
     local actionType = GetSlotType(slot)
+
     if actionType == ACTION_TYPE_CRAFTED_ABILITY then
-        ability = Util.Ability:ForId(GetAbilityIdForCraftedAbilityId(GetSlotBoundId(slot)))
+        ability = Util.Ability:ForId(GetAbilityIdForCraftedAbilityId(GetSlotBoundId(slot)), actionType)
+    else
+        ability = Util.Ability:ForId(GetSlotBoundId(slot), actionType)
     end
     -- Util.log("SLOT NAME = ", GetSlotName(slot))
-    -- local ability = Util.Ability:ForName(GetSlotName(slot), slot)
     if not (ability) then return end
 
     if (ability.light) then return end
@@ -310,9 +275,22 @@ function Ability.Tracker:HandleSlotUsed(e, slot)
     self:CancelEvent()
 
     if (ability.heavy) then return end
-
-    -- _=self.log and d(""..getFrameTimeMilliseconds().." : New ability - "..ability.name)
+    
+    -- _=self.log and d(""..GetFrameTimeMilliseconds().." : New ability - "..ability.name)
     self:NewEvent(ability, slot)
+    
+    if actionType == ACTION_TYPE_CRAFTED_ABILITY and ability.casted then
+        local time = GetFrameTimeMilliseconds()
+        local isMounted = time < self.lastMounted + DISMOUNT_PERIOD + EVENT_RECORD_DELAY
+        local isWeaponSheathed = time < self.weaponLastSheathed + EVENT_FORCE_WAIT + EVENT_RECORD_DELAY
+        if isMounted then
+            zo_callLater(function() self:HandleSlotUpdated("FAKE_EVENT", slot) end, 1000);
+        elseif isWeaponSheathed then
+            zo_callLater(function() self:HandleSlotUpdated("FAKE_EVENT", slot) end, 1000);
+        else
+            self:HandleSlotUpdated("FAKE_EVENT", slot)
+        end
+    end
 end
 
 local CHECK_PLAYER_UNIT_ID_INTERVAL = 5000
@@ -322,7 +300,7 @@ local CHECK_PLAYER_UNIT_ID_INTERVAL = 5000
 --                                         1      2     3      4     5  6      7      8      9
 --                                         10     11    12     13    14 15     16     17     18
 function Ability.Tracker:HandleCombatEvent(_,     res,  err,   aName, _, _,    sName, sType, tName, 
-                                           tType, hVal, pType, dType, _, sUId, tUId,  aId,   _     )
+                                           tType, hVal, pType, dType, _, sUId, tUId, aId, _)
     if (not err and Util.Targeting.isUnitPlayer(tName, tUId)) then
         if (   res == ACTION_RESULT_KNOCKBACK
             or res == ACTION_RESULT_PACIFIED
@@ -356,7 +334,7 @@ function Ability.Tracker:HandleCombatEvent(_,     res,  err,   aName, _, _,    s
                 return
             end
 
-            local heavy = Util.Ability:ForId(heavyId)
+            local heavy = Util.Ability:ForId(heavyId, ACTION_SLOT_TYPE_HEAVY_ATTACK)
             -- _=self.log and d("New heavy ability - "..heavy.name)
             self:NewEvent(heavy, 2)
             self.eventStart = self.queuedEvent.recorded
